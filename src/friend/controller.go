@@ -1,0 +1,66 @@
+package friend
+
+import (
+	"net/http"
+	"ws/src/auth"
+	"ws/src/notify"
+
+	"github.com/gin-gonic/gin"
+	"go.mongodb.org/mongo-driver/v2/bson"
+)
+
+type Controller struct {
+	Repo *Repository
+}
+
+func NewController(r *Repository) *Controller {
+	return &Controller{Repo: r}
+}
+
+func (ctrl *Controller) SendRequest(c *gin.Context) {
+	var input struct {
+		ToUserID string `json:"to_user_id"`
+	}
+
+	c.BindJSON(&input)
+
+	fromID := c.MustGet(auth.UserIDKey).(string)
+	fromObjID, _ := bson.ObjectIDFromHex(fromID)
+	toObjiD, _ := bson.ObjectIDFromHex(input.ToUserID)
+
+	if err := ctrl.Repo.SendRequest(fromObjID, toObjiD); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Can not send friend request"})
+		return
+	}
+
+	// Gửi notify cho người nhận
+	notify.SendToUser(toObjiD.Hex(), "Bạn có một lời mời kết bạn !")
+
+	c.JSON(http.StatusOK, gin.H{"message": "Friend Request Sent !"})
+
+}
+
+func (ctrl *Controller) AcceptRequest(c *gin.Context) {
+	var input struct {
+		RequestID string `json:"request_id"`
+	}
+
+	c.BindJSON(&input)
+
+	requestObjID, _ := bson.ObjectIDFromHex(input.RequestID)
+	
+	req, err:= ctrl.Repo.GetRequestByID(requestObjID)
+	if err !=nil{
+		c.JSON(http.StatusInternalServerError,gin.H{
+			"error":"User ID not found",
+		})
+		return
+	}
+
+	if err := ctrl.Repo.AcceptRequest(requestObjID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Can not Accept friend request"})
+		return
+	}
+	notify.SendToUser(req.FromUserID.Hex(), "Lời mời kết bạn đã đc duyệt !")
+	c.JSON(http.StatusOK, gin.H{"message": "Friend Request Accepted !"})
+}	
